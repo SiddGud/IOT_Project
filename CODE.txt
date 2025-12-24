@@ -1,0 +1,155 @@
+#include <Servo.h>
+#include <SoftwareSerial.h>
+
+const int rainSensorDigitalPin = 2;
+const int rainSensorAnalogPin = A0;
+const int noRainThreshold = 800;
+const int thresholdDelay = 800;
+const int minDelay = 200;
+const unsigned long outputDelay = 1000;
+
+Servo wiperServo;
+SoftwareSerial BTSerial(12, 13);
+char command = '\0';
+bool isManualMode = false;
+int delayTime = thresholdDelay;
+unsigned long lastOutputTime = 0;
+
+void setup() {
+  pinMode(rainSensorDigitalPin, INPUT);
+  wiperServo.attach(7);
+  Serial.begin(9600);
+  BTSerial.begin(9600);
+  Serial.println("Wiper Control System Initialized");
+  BTSerial.println("Wiper Control System Ready");
+}
+
+void loop() {
+  if (BTSerial.available()) {
+    char received = BTSerial.read();
+    if (received != '\n' && received != '\r') {
+      command = received;
+      handleBluetoothCommand(command);
+    }
+  }
+
+  if (!isManualMode) {
+    unsigned long currentTime = millis();
+    if (currentTime - lastOutputTime >= outputDelay) {
+      int rainDetected = digitalRead(rainSensorDigitalPin);
+      int rainIntensity = analogRead(rainSensorAnalogPin);
+
+      if (rainDetected == LOW) {
+        adjustWiperSpeed(rainIntensity);
+        wipeContinuously();
+      } else {
+        wiperServo.write(90);
+      }
+      lastOutputTime = currentTime;
+    }
+  }
+}
+
+void handleBluetoothCommand(char cmd) {
+  switch (cmd) {
+    case 'M':
+      isManualMode = true;
+      Serial.println("Switched to Manual Mode");
+      BTSerial.println("Manual Mode Activated");
+      break;
+
+    case 'A':
+      isManualMode = false;
+      Serial.println("Switched to Automatic Mode");
+      BTSerial.println("Automatic Mode Activated");
+      break;
+
+    case 'O':
+      if (isManualMode) {
+        wipeOnce();
+      }
+      break;
+
+    case 'C':
+      if (isManualMode) {
+        wipeContinuously();
+      }
+      break;
+
+    case 'S':
+      if (isManualMode) {
+        stopWiping();
+      }
+      break;
+
+    default:
+      Serial.print("Unknown command received: ");
+      Serial.println(cmd);
+      BTSerial.println("Error: Unknown command");
+      break;
+  }
+}
+
+void adjustWiperSpeed(int intensity) {
+  if (intensity > noRainThreshold) {
+    delayTime = 800;
+    Serial.println("Light rain - Slow wiper speed.");
+  } else if (intensity > noRainThreshold / 2) {
+    delayTime = 500;
+    Serial.println("Moderate rain - Medium wiper speed.");
+  } else {
+    delayTime = 200;
+    Serial.println("Heavy rain - Fast wiper speed.");
+  }
+}
+
+void wipeOnce() {
+  Serial.println("Single wipe initiated.");
+  wiperServo.write(0);
+  delay(500);
+  wiperServo.write(90);
+  delay(500);
+}
+
+void wipeContinuously() {
+  Serial.println("Continuous wiping started.");
+  
+  if (isManualMode) {
+    while (isManualMode) {
+      if (BTSerial.available()) {
+        char receivedCmd = BTSerial.read();
+        if (receivedCmd == 'S') {
+          stopWiping();
+          break;
+        } else if (receivedCmd == '1') {
+          delayTime = thresholdDelay;
+          Serial.println("Wiper speed set to: Slow");
+          BTSerial.println("Wiper speed set to: Slow");
+        } else if (receivedCmd == '2') {
+          delayTime = (thresholdDelay + minDelay) / 2;
+          Serial.println("Wiper speed set to: Medium");
+          BTSerial.println("Wiper speed set to: Medium");
+        } else if (receivedCmd == '3') {
+          delayTime = minDelay;
+          Serial.println("Wiper speed set to: Fast");
+          BTSerial.println("Wiper speed set to: Fast");
+        }
+      }
+
+      wiperServo.write(0);
+      delay(delayTime);
+      wiperServo.write(90);
+      delay(delayTime);
+    }
+  } else {
+    wiperServo.write(0);
+    delay(delayTime);
+    wiperServo.write(90);
+    delay(delayTime);
+  }
+}
+
+void stopWiping() {
+  Serial.println("Wiping stopped.");
+  wiperServo.write(90);
+}
